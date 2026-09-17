@@ -1,0 +1,6 @@
+# Build output
+bin/
+obj/
+
+# Local PulseStackAI development feed
+.packages/

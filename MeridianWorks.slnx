@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MeridianWorks.App/MeridianWorks.App.csproj" />
+  </Folder>
+</Solution>
