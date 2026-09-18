@@ -1,10 +1,17 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PulseStack.Abstractions.Assets;
+using PulseStack.Abstractions.Persistence.AIAssets.Catalog;
+using PulseStack.Abstractions.Persistence.AIAssets.Mapping;
+using PulseStack.Abstractions.Persistence.AIAssets.Serialization;
+using PulseStack.Abstractions.Persistence.AIAssets.Storage;
+using PulseStack.Abstractions.Persistence.AIAssets.Validation;
 using PulseStack.Abstractions.Workflows.Definitions;
-using PulseStack.Core.Assets;
 using PulseStack.Agents.Builders;
+using PulseStack.Core.Assets;
 using PulseStack.Core.DependencyInjection;
+using PulseStack.Core.Persistence.AIAssets.Catalog;
+using PulseStack.Core.Persistence.AIAssets.Storage;
 using PulseStack.Providers.OpenRouter.DependencyInjection;
 
 var configuration = new ConfigurationBuilder()
@@ -32,11 +39,18 @@ services
 using var serviceProvider =
     services.BuildServiceProvider();
 
+var modelId = StableId("6c87f3c8-b8df-4f8d-bdb0-7f7a310da001");
+var promptId = StableId("6c87f3c8-b8df-4f8d-bdb0-7f7a310da002");
+var agentId = StableId("6c87f3c8-b8df-4f8d-bdb0-7f7a310da003");
+var workflowId = StableId("6c87f3c8-b8df-4f8d-bdb0-7f7a310da004");
+var projectId = StableId("6c87f3c8-b8df-4f8d-bdb0-7f7a310da005");
+
 var modelAssetFactory =
     serviceProvider.GetRequiredService<ModelAssetFactory>();
 
 var modelAsset =
     modelAssetFactory.Create(
+        modelId,
         new ModelAssetOptions(
             Provider: "OpenRouter",
             Model: model));
@@ -46,6 +60,7 @@ var promptAssetFactory =
 
 var promptAsset =
     promptAssetFactory.Create(
+        promptId,
         new PromptAssetOptions
         {
             Name = "RFQ Analysis",
@@ -83,6 +98,7 @@ var promptAsset =
 
 var agent =
     new AgentBuilder("RFQ Analyst")
+        .WithId(agentId)
         .WithRole("Manufacturing RFQ Analyst")
         .WithGoal(
             "Analyze customer RFQs and prepare a quotation brief " +
@@ -103,6 +119,7 @@ var workflowAssetFactory =
 
 var workflow =
     workflowAssetFactory.Create(
+        workflowId,
         new WorkflowAssetOptions
         {
             Name = "Analyze RFQ",
@@ -122,6 +139,7 @@ var projectAssetFactory =
 
 var project =
     projectAssetFactory.Create(
+        projectId,
         new ProjectAssetOptions
         {
             Name = "Meridian Works",
@@ -194,6 +212,92 @@ VerifyDeclarativeGraph(
 Console.WriteLine();
 Console.WriteLine(
     "Meridian Works V1 declarative graph: VERIFIED");
+
+var persistenceRoot = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+    "MeridianWorks",
+    "PulseStackAI");
+
+var store = new FileSerializedAIAssetStore(
+    Path.Combine(persistenceRoot, "assets"));
+var catalog = new FileAIAssetCatalogProvider(
+    Path.Combine(persistenceRoot, "catalog"));
+var codec = new AIAssetDocumentCodec();
+var validator =
+    serviceProvider.GetRequiredService<IAIAssetDocumentValidator>();
+var mapper =
+    serviceProvider.GetRequiredService<IAIAssetDocumentMapper>();
+var storageOptions = new AIAssetStorageOptions
+{
+    MaximumRepresentationSizeBytes = 4 * 1024 * 1024
+};
+var writer = new AIAssetWriter(
+    store,
+    codec,
+    validator,
+    storageOptions);
+var loader = new AIAssetLoader(
+    store,
+    codec,
+    validator,
+    mapper,
+    storageOptions);
+var publisher = new AIAssetPublisher(
+    catalog,
+    loader);
+
+IAsset[] definitions =
+[
+    modelAsset,
+    promptAsset,
+    agent,
+    workflow,
+    project
+];
+
+foreach (var definition in definitions)
+{
+    var key = DefinitionKey(definition);
+    var document = mapper.ToDocument(definition);
+    var result = await writer.WriteAsync(key, document);
+
+    if (result is not (AIAssetWriteResult.Created or AIAssetWriteResult.AlreadyPresent))
+    {
+        throw new InvalidOperationException(
+            $"Persistence failed for {definition.Type} '{definition.Urn}': {result}.");
+    }
+
+    Console.WriteLine(
+        $"Stored {definition.Type}: {result}");
+}
+
+foreach (var definition in definitions)
+{
+    var key = DefinitionKey(definition);
+    var result = await publisher.PublishAsync(key);
+
+    if (result is not (AIAssetPublicationResult.Published or AIAssetPublicationResult.AlreadyPublished))
+    {
+        throw new InvalidOperationException(
+            $"Publication failed for {definition.Type} '{definition.Urn}': {result}.");
+    }
+
+    Console.WriteLine(
+        $"Published {definition.Type}: {result}");
+}
+
+Console.WriteLine();
+Console.WriteLine(
+    "Meridian Works V1 declarative application: PERSISTED + PUBLISHED");
+
+static AssetId StableId(string value) =>
+    new(Guid.Parse(value));
+
+static AssetDefinitionKey DefinitionKey(IAsset asset) =>
+    new(
+        asset.Type,
+        asset.Id,
+        asset.Version);
 
 static AssetReference Reference(IAsset asset) =>
     new(
