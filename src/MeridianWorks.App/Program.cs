@@ -129,6 +129,8 @@ var workflow =
             [
                 new RunStepDefinition
                 {
+                    Id = new WorkflowStepId(
+                        Guid.Parse("6c87f3c8-b8df-4f8d-bdb0-7f7a310da006")),
                     Agent = Reference(agent)
                 }
             ]
