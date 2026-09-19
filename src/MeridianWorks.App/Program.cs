@@ -5,9 +5,11 @@ using PulseStack.Abstractions.Persistence.AIAssets.Catalog;
 using PulseStack.Abstractions.Persistence.AIAssets.GraphLoading;
 using PulseStack.Abstractions.Persistence.AIAssets.Mapping;
 using PulseStack.Abstractions.Persistence.AIAssets.Storage;
+using PulseStack.Abstractions.Runtime.Realization.Application;
 using PulseStack.Abstractions.Workflows;
 using PulseStack.Abstractions.Workflows.Definitions;
 using PulseStack.Agents.Builders;
+using PulseStack.Agents.DependencyInjection;
 using PulseStack.Core.Assets;
 using PulseStack.Core.DependencyInjection;
 using PulseStack.Providers.OpenRouter.DependencyInjection;
@@ -39,6 +41,7 @@ var services = new ServiceCollection();
 
 services
     .AddPulseStack()
+    .AddPulseStackAgents()
     .AddFileAIAssetStorage(
         Path.Combine(persistenceRoot, "assets"),
         storageOptions)
@@ -304,6 +307,30 @@ Console.WriteLine();
 Console.WriteLine(
     "Meridian Works V1 persistent declarative graph: LOADED + VERIFIED");
 
+using var realizationScope =
+    serviceProvider.CreateScope();
+
+var applicationRealizer =
+    realizationScope.ServiceProvider.GetRequiredService<IApplicationRealizer>();
+
+var realizationResult =
+    await applicationRealizer.RealizeAsync(graphSuccess.Graph);
+
+if (realizationResult is not ApplicationRealizationResult.Success realizationSuccess)
+{
+    throw new InvalidOperationException(
+        $"Application realization failed for Project '{project.Urn}': {realizationResult.GetType().Name}.");
+}
+
+VerifyRealizedApplication(
+    realizationSuccess.Application,
+    project,
+    workflow);
+
+Console.WriteLine();
+Console.WriteLine(
+    "Meridian Works V1 persistent application: REALIZED + VERIFIED");
+
 static AssetId StableId(string value) =>
     new(Guid.Parse(value));
 
@@ -453,6 +480,42 @@ static void VerifyPersistentGraph(
         graph,
         DefinitionKey(agent),
         Reference(model));
+}
+
+static void VerifyRealizedApplication(
+    RealizedApplication application,
+    ProjectAsset project,
+    WorkflowAsset workflow)
+{
+    if (application.Project != Reference(project))
+    {
+        throw new InvalidOperationException(
+            "Realized application Project does not match Meridian Works.");
+    }
+
+    if (application.EntryWorkflow != Reference(workflow))
+    {
+        throw new InvalidOperationException(
+            "Realized application entry Workflow does not match Analyze RFQ.");
+    }
+
+    if (application.Workflow.Name != workflow.Options.Name)
+    {
+        throw new InvalidOperationException(
+            "Realized Workflow name does not match the persisted Analyze RFQ definition.");
+    }
+
+    if (application.Workflow.Definition.Description != workflow.Options.Description)
+    {
+        throw new InvalidOperationException(
+            "Realized Workflow description does not match the persisted Analyze RFQ definition.");
+    }
+
+    if (application.Workflow.Steps.Count != workflow.Options.Steps.Count)
+    {
+        throw new InvalidOperationException(
+            "Realized Workflow step count does not match the persisted Analyze RFQ definition.");
+    }
 }
 
 static void RequireRelationship(
