@@ -9,9 +9,9 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.6" />
-    <PackageReference Include="PulseStack.Agents" Version="1.0.1" />
-    <PackageReference Include="PulseStack.Core" Version="1.0.1" />
-    <PackageReference Include="PulseStack.Providers.OpenRouter" Version="1.0.1" />
+    <PackageReference Include="PulseStack.Agents" Version="1.0.3" />
+    <PackageReference Include="PulseStack.Core" Version="1.0.3" />
+    <PackageReference Include="PulseStack.Providers.OpenRouter" Version="1.0.3" />
   </ItemGroup>
 
   <ItemGroup>

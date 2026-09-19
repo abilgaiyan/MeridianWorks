@@ -6,6 +6,7 @@ using PulseStack.Abstractions.Persistence.AIAssets.Mapping;
 using PulseStack.Abstractions.Persistence.AIAssets.Serialization;
 using PulseStack.Abstractions.Persistence.AIAssets.Storage;
 using PulseStack.Abstractions.Persistence.AIAssets.Validation;
+using PulseStack.Abstractions.Workflows;
 using PulseStack.Abstractions.Workflows.Definitions;
 using PulseStack.Agents.Builders;
 using PulseStack.Core.Assets;
@@ -117,22 +118,23 @@ var agent =
 var workflowAssetFactory =
     serviceProvider.GetRequiredService<WorkflowAssetFactory>();
 
+var analyzeRfqStep =
+    DurableWorkflowStep.Run(
+        new WorkflowStepId(
+            Guid.Parse("6c87f3c8-b8df-4f8d-bdb0-7f7a310da006")),
+        Reference(agent));
+
 var workflow =
     workflowAssetFactory.Create(
         workflowId,
-        new WorkflowAssetOptions
+        new IdentityCompleteWorkflowAssetOptions
         {
             Name = "Analyze RFQ",
             Description =
                 "Analyze a customer RFQ and prepare a quotation brief.",
             Steps =
             [
-                new RunStepDefinition
-                {
-                    Id = new WorkflowStepId(
-                        Guid.Parse("6c87f3c8-b8df-4f8d-bdb0-7f7a310da006")),
-                    Agent = Reference(agent)
-                }
+                analyzeRfqStep
             ]
         });
 
