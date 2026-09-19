@@ -2,17 +2,14 @@
 using Microsoft.Extensions.DependencyInjection;
 using PulseStack.Abstractions.Assets;
 using PulseStack.Abstractions.Persistence.AIAssets.Catalog;
+using PulseStack.Abstractions.Persistence.AIAssets.GraphLoading;
 using PulseStack.Abstractions.Persistence.AIAssets.Mapping;
-using PulseStack.Abstractions.Persistence.AIAssets.Serialization;
 using PulseStack.Abstractions.Persistence.AIAssets.Storage;
-using PulseStack.Abstractions.Persistence.AIAssets.Validation;
 using PulseStack.Abstractions.Workflows;
 using PulseStack.Abstractions.Workflows.Definitions;
 using PulseStack.Agents.Builders;
 using PulseStack.Core.Assets;
 using PulseStack.Core.DependencyInjection;
-using PulseStack.Core.Persistence.AIAssets.Catalog;
-using PulseStack.Core.Persistence.AIAssets.Storage;
 using PulseStack.Providers.OpenRouter.DependencyInjection;
 
 var configuration = new ConfigurationBuilder()
@@ -29,10 +26,25 @@ var model =
     ?? throw new InvalidOperationException(
         "OpenRouter:Model is not configured.");
 
+var persistenceRoot = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+    "MeridianWorks",
+    "PulseStackAI");
+var storageOptions = new AIAssetStorageOptions
+{
+    MaximumRepresentationSizeBytes = 4 * 1024 * 1024
+};
+
 var services = new ServiceCollection();
 
 services
     .AddPulseStack()
+    .AddFileAIAssetStorage(
+        Path.Combine(persistenceRoot, "assets"),
+        storageOptions)
+    .AddFileAIAssetCatalog(
+        Path.Combine(persistenceRoot, "catalog"))
+    .AddAIAssetGraphLoading()
     .UseOpenRouter(
         apiKey: apiKey,
         model: model);
@@ -217,38 +229,12 @@ Console.WriteLine();
 Console.WriteLine(
     "Meridian Works V1 declarative graph: VERIFIED");
 
-var persistenceRoot = Path.Combine(
-    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-    "MeridianWorks",
-    "PulseStackAI");
-
-var store = new FileSerializedAIAssetStore(
-    Path.Combine(persistenceRoot, "assets"));
-var catalog = new FileAIAssetCatalogProvider(
-    Path.Combine(persistenceRoot, "catalog"));
-var codec = new AIAssetDocumentCodec();
-var validator =
-    serviceProvider.GetRequiredService<IAIAssetDocumentValidator>();
 var mapper =
     serviceProvider.GetRequiredService<IAIAssetDocumentMapper>();
-var storageOptions = new AIAssetStorageOptions
-{
-    MaximumRepresentationSizeBytes = 4 * 1024 * 1024
-};
-var writer = new AIAssetWriter(
-    store,
-    codec,
-    validator,
-    storageOptions);
-var loader = new AIAssetLoader(
-    store,
-    codec,
-    validator,
-    mapper,
-    storageOptions);
-var publisher = new AIAssetPublisher(
-    catalog,
-    loader);
+var writer =
+    serviceProvider.GetRequiredService<IAIAssetWriter>();
+var publisher =
+    serviceProvider.GetRequiredService<IAIAssetPublisher>();
 
 IAsset[] definitions =
 [
@@ -293,6 +279,30 @@ foreach (var definition in definitions)
 Console.WriteLine();
 Console.WriteLine(
     "Meridian Works V1 declarative application: PERSISTED + PUBLISHED");
+
+var graphLoader =
+    serviceProvider.GetRequiredService<IAIAssetGraphLoader>();
+var projectKey = DefinitionKey(project);
+var graphLoadResult =
+    await graphLoader.LoadAsync(projectKey);
+
+if (graphLoadResult is not AIAssetGraphLoadResult.Success graphSuccess)
+{
+    throw new InvalidOperationException(
+        $"Persistent graph loading failed for Project '{project.Urn}': {graphLoadResult.GetType().Name}.");
+}
+
+VerifyPersistentGraph(
+    graphSuccess.Graph,
+    project,
+    workflow,
+    agent,
+    promptAsset,
+    modelAsset);
+
+Console.WriteLine();
+Console.WriteLine(
+    "Meridian Works V1 persistent declarative graph: LOADED + VERIFIED");
 
 static AssetId StableId(string value) =>
     new(Guid.Parse(value));
@@ -380,5 +390,84 @@ static void VerifyDeclarativeGraph(
     {
         throw new InvalidOperationException(
             "RFQ Analyst contains capabilities outside the Meridian Works V1 boundary.");
+    }
+}
+
+
+static void VerifyPersistentGraph(
+    AIAssetGraph graph,
+    ProjectAsset project,
+    WorkflowAsset workflow,
+    AgentDefinition agent,
+    PromptAsset prompt,
+    ModelAsset model)
+{
+    var expectedRootKey = DefinitionKey(project);
+    if (graph.RootKey != expectedRootKey)
+    {
+        throw new InvalidOperationException(
+            "Persistent graph root does not match the Meridian Works Project.");
+    }
+
+    IAsset[] expectedAssets =
+    [
+        project,
+        workflow,
+        agent,
+        prompt,
+        model
+    ];
+
+    var expectedByKey =
+        expectedAssets.ToDictionary(DefinitionKey);
+
+    if (graph.Nodes.Count != expectedByKey.Count)
+    {
+        throw new InvalidOperationException(
+            "Persistent graph does not contain exactly the Meridian Works V1 assets.");
+    }
+
+    foreach (var node in graph.Nodes)
+    {
+        if (!expectedByKey.TryGetValue(node.DefinitionKey, out var expected)
+            || node.Asset.Urn != expected.Urn)
+        {
+            throw new InvalidOperationException(
+                $"Persistent graph contains an unexpected or identity-incoherent node '{node.DefinitionKey}'.");
+        }
+    }
+
+    RequireRelationship(
+        graph,
+        DefinitionKey(project),
+        Reference(workflow));
+    RequireRelationship(
+        graph,
+        DefinitionKey(workflow),
+        Reference(agent));
+    RequireRelationship(
+        graph,
+        DefinitionKey(agent),
+        Reference(prompt));
+    RequireRelationship(
+        graph,
+        DefinitionKey(agent),
+        Reference(model));
+}
+
+static void RequireRelationship(
+    AIAssetGraph graph,
+    AssetDefinitionKey sourceKey,
+    AssetReference targetReference)
+{
+    if (!graph.Relationships.Any(
+            relationship =>
+                relationship.SourceKey == sourceKey
+                && relationship.TargetReference == targetReference
+                && relationship.MaterializationAuthority
+                    == AIAssetGraphMaterializationAuthority.Required))
+    {
+        throw new InvalidOperationException(
+            $"Persistent graph is missing required relationship '{sourceKey}' -> '{targetReference.Urn}'.");
     }
 }
