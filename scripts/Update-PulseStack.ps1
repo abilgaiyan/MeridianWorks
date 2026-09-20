@@ -91,7 +91,6 @@ function Set-ManagedPackageVersions {
         $(if ($hasUtf8Bom) { 3 } else { 0 }),
         $OriginalBytes.Length - $(if ($hasUtf8Bom) { 3 } else { 0 }))
     $updated = $text
-    $updated = $text
 
     foreach ($packageId in $managedPackages) {
         $escapedId = [regex]::Escape($packageId)
