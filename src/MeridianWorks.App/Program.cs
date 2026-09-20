@@ -5,6 +5,8 @@ using PulseStack.Abstractions.Persistence.AIAssets.Catalog;
 using PulseStack.Abstractions.Persistence.AIAssets.GraphLoading;
 using PulseStack.Abstractions.Persistence.AIAssets.Mapping;
 using PulseStack.Abstractions.Persistence.AIAssets.Storage;
+using PulseStack.Abstractions.Runtime.Application;
+using PulseStack.Abstractions.Runtime.Invocation.Application;
 using PulseStack.Abstractions.Runtime.Realization.Application;
 using PulseStack.Abstractions.Workflows;
 using PulseStack.Abstractions.Workflows.Definitions;
@@ -42,6 +44,7 @@ var services = new ServiceCollection();
 services
     .AddPulseStack()
     .AddPulseStackAgents()
+    .AddPulseStackWorkflows()
     .AddFileAIAssetStorage(
         Path.Combine(persistenceRoot, "assets"),
         storageOptions)
@@ -330,6 +333,68 @@ VerifyRealizedApplication(
 Console.WriteLine();
 Console.WriteLine(
     "Meridian Works V1 persistent application: REALIZED + VERIFIED");
+
+const string rfqInput =
+    """
+    Customer: Apex Motion Systems
+    Part: Precision drive shaft
+    Quantity: 250 pieces
+    Material: EN8 steel
+    Dimensions: 32 mm diameter x 420 mm length
+    Delivery: Required within 6 weeks
+
+    Please provide your quotation for manufacturing the above component.
+    """;
+
+using var operationScope =
+    serviceProvider.CreateScope();
+
+var applicationOperation =
+    operationScope.ServiceProvider.GetRequiredService<IApplicationOperation>();
+
+var operationResult =
+    await applicationOperation.ExecuteAsync(
+        projectKey,
+        new ApplicationInvocationRequest(rfqInput));
+
+if (operationResult is not ApplicationOperationResult.InvocationOutcome invocationOutcome)
+{
+    throw new InvalidOperationException(
+        $"Integrated application execution did not reach invocation for Project '{project.Urn}': {operationResult.GetType().Name}.");
+}
+
+var invocationResult = invocationOutcome.Result;
+
+if (!invocationResult.Success)
+{
+    throw new InvalidOperationException(
+        "Integrated Meridian Works application invocation did not succeed.");
+}
+
+if (invocationResult.Project != Reference(project))
+{
+    throw new InvalidOperationException(
+        "Invocation result Project does not match Meridian Works.");
+}
+
+if (invocationResult.EntryWorkflow != Reference(workflow))
+{
+    throw new InvalidOperationException(
+        "Invocation result entry Workflow does not match Analyze RFQ.");
+}
+
+if (string.IsNullOrWhiteSpace(invocationResult.FinalOutput))
+{
+    throw new InvalidOperationException(
+        "Integrated Meridian Works application invocation produced no RFQ analysis output.");
+}
+
+Console.WriteLine();
+Console.WriteLine("Meridian Works RFQ Analysis");
+Console.WriteLine(invocationResult.FinalOutput);
+Console.WriteLine();
+Console.WriteLine(
+    "Meridian Works V1 integrated application: INVOKED + VERIFIED");
 
 static AssetId StableId(string value) =>
     new(Guid.Parse(value));
