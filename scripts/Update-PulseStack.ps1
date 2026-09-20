@@ -75,10 +75,22 @@ function Assert-ManagedReferences {
 function Set-ManagedPackageVersions {
     param(
         [string]$Path,
-        [string]$RequestedVersion
+        [string]$RequestedVersion,
+        [byte[]]$OriginalBytes
     )
 
-    $text = [System.IO.File]::ReadAllText($Path)
+    $hasUtf8Bom =
+        $OriginalBytes.Length -ge 3 -and
+        $OriginalBytes[0] -eq 0xEF -and
+        $OriginalBytes[1] -eq 0xBB -and
+        $OriginalBytes[2] -eq 0xBF
+
+    $encoding = [System.Text.UTF8Encoding]::new($hasUtf8Bom)
+    $text = $encoding.GetString(
+        $OriginalBytes,
+        $(if ($hasUtf8Bom) { 3 } else { 0 }),
+        $OriginalBytes.Length - $(if ($hasUtf8Bom) { 3 } else { 0 }))
+    $updated = $text
     $updated = $text
 
     foreach ($packageId in $managedPackages) {
@@ -97,7 +109,7 @@ function Set-ManagedPackageVersions {
             [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
     }
 
-    [System.IO.File]::WriteAllText($Path, $updated, [System.Text.UTF8Encoding]::new($true))
+    [System.IO.File]::WriteAllText($Path, $updated, $encoding)
 }
 
 function Assert-ResolvedPulseStackGraph {
@@ -169,7 +181,7 @@ try {
     Write-Host "  $Version"
     Write-Host ""
 
-    Set-ManagedPackageVersions -Path $projectPath -RequestedVersion $Version
+    Set-ManagedPackageVersions -Path $projectPath -RequestedVersion $Version -OriginalBytes $originalProjectBytes
     $projectMutated = $true
     Assert-ManagedReferences -Path $projectPath
 
