@@ -16,6 +16,13 @@ using PulseStack.Core.Assets;
 using PulseStack.Core.DependencyInjection;
 using PulseStack.Providers.OpenRouter.DependencyInjection;
 
+var mode = args.Length == 0 ? "default" : args[0];
+if (mode is not ("default" or "prepare" or "execute") ||
+    (mode == "default" ? args.Length != 0 : args.Length != 2))
+{
+    throw new ArgumentException("Usage: MeridianWorks.App [prepare|execute <proof-directory>]");
+}
+
 var configuration = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json")
     .Build();
@@ -30,10 +37,31 @@ var model =
     ?? throw new InvalidOperationException(
         "OpenRouter:Model is not configured.");
 
-var persistenceRoot = Path.Combine(
+var defaultPersistenceRoot = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
     "MeridianWorks",
     "PulseStackAI");
+var persistenceRoot = mode == "default"
+    ? defaultPersistenceRoot
+    : Path.GetFullPath(args[1]);
+if (mode != "default" &&
+    string.Equals(persistenceRoot.TrimEnd(Path.DirectorySeparatorChar),
+        defaultPersistenceRoot.TrimEnd(Path.DirectorySeparatorChar),
+        StringComparison.OrdinalIgnoreCase))
+{
+    throw new ArgumentException("Use a dedicated proof directory, not the default application store.");
+}
+var preparationPath = Path.Combine(persistenceRoot, "prepared-application.json");
+if (mode == "prepare" && Directory.Exists(persistenceRoot) &&
+    Directory.EnumerateFileSystemEntries(persistenceRoot).Any())
+{
+    throw new InvalidOperationException("Preparation requires an empty proof directory.");
+}
+if (mode == "execute" && !File.Exists(preparationPath))
+{
+    throw new InvalidOperationException("Prepared application identity is unavailable.");
+}
+
 var storageOptions = new AIAssetStorageOptions
 {
     MaximumRepresentationSizeBytes = 4 * 1024 * 1024
@@ -57,6 +85,43 @@ services
 
 using var serviceProvider =
     services.BuildServiceProvider();
+
+if (mode == "execute")
+{
+    using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(preparationPath));
+    var root = document.RootElement;
+    if (root.GetProperty("schemaVersion").GetInt32() != 1)
+        throw new InvalidOperationException("Unsupported preparation record.");
+    AssetReference ReadReference(string name, AssetType expectedType)
+    {
+        var value = root.GetProperty(name);
+        if (value.GetProperty("type").GetString() != expectedType.ToString())
+            throw new InvalidOperationException("Preparation record contains an unexpected asset type.");
+        return new AssetReference(expectedType,
+            new AssetId(Guid.Parse(value.GetProperty("id").GetString()!)),
+            new AssetUrn(value.GetProperty("urn").GetString()!),
+            new AssetVersion(value.GetProperty("version").GetString()!));
+    }
+    var expectedProject = ReadReference("project", AssetType.Project);
+    var expectedWorkflow = ReadReference("entryWorkflow", AssetType.Workflow);
+    var retainedKey = new AssetDefinitionKey(expectedProject.Type, expectedProject.Id, expectedProject.Version);
+    var before = PersistenceSnapshot(persistenceRoot);
+    using var executionScope = serviceProvider.CreateScope();
+    var operation = executionScope.ServiceProvider.GetRequiredService<IApplicationOperation>();
+    var result = await operation.ExecuteAsync(retainedKey,
+        new ApplicationInvocationRequest("Customer: Apex Motion Systems. RFQ: 250 EN8 steel drive shafts, 32 mm x 420 mm, delivery within 6 weeks. Identify missing quotation-critical information."));
+    if (result is not ApplicationOperationResult.InvocationOutcome outcome ||
+        !outcome.Result.Success ||
+        outcome.Result.Project != expectedProject ||
+        outcome.Result.EntryWorkflow != expectedWorkflow ||
+        string.IsNullOrWhiteSpace(outcome.Result.FinalOutput))
+        throw new InvalidOperationException($"Restart execution verification failed: {result.GetType().Name}.");
+    if (!before.SequenceEqual(PersistenceSnapshot(persistenceRoot)))
+        throw new InvalidOperationException("Execution changed persisted asset/catalog contents.");
+    Console.WriteLine(outcome.Result.FinalOutput);
+    Console.WriteLine($"Process {Environment.ProcessId}: RESTART EXECUTION VERIFIED; persistence unchanged.");
+    return;
+}
 
 var modelId = StableId("6c87f3c8-b8df-4f8d-bdb0-7f7a310da001");
 var promptId = StableId("6c87f3c8-b8df-4f8d-bdb0-7f7a310da002");
@@ -285,6 +350,29 @@ foreach (var definition in definitions)
 Console.WriteLine();
 Console.WriteLine(
     "Meridian Works V1 declarative application: PERSISTED + PUBLISHED");
+
+if (mode == "prepare")
+{
+    object Identity(IAsset asset) => new
+    {
+        type = asset.Type.ToString(),
+        id = asset.Id.Value.ToString("D"),
+        urn = asset.Urn.Value,
+        version = asset.Version.Value
+    };
+    var record = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        schemaVersion = 1,
+        preparationProcessId = Environment.ProcessId,
+        project = Identity(project),
+        entryWorkflow = Identity(workflow)
+    }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+    using (var file = new FileStream(preparationPath, FileMode.CreateNew, FileAccess.Write))
+    using (var output = new StreamWriter(file))
+        output.Write(record);
+    Console.WriteLine($"Process {Environment.ProcessId}: PREPARED; no invocation performed.");
+    return;
+}
 
 var graphLoader =
     serviceProvider.GetRequiredService<IAIAssetGraphLoader>();
@@ -598,4 +686,14 @@ static void RequireRelationship(
         throw new InvalidOperationException(
             $"Persistent graph is missing required relationship '{sourceKey}' -> '{targetReference.Urn}'.");
     }
+}
+
+static string[] PersistenceSnapshot(string root)
+{
+    return new[] { "assets", "catalog" }
+        .SelectMany(name => Directory.EnumerateFiles(Path.Combine(root, name), "*", SearchOption.AllDirectories))
+        .OrderBy(path => path, StringComparer.Ordinal)
+        .Select(path => Path.GetRelativePath(root, path) + ":" +
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))))
+        .ToArray();
 }
