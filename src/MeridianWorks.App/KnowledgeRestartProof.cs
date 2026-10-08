@@ -6,6 +6,7 @@ using PulseStack.Abstractions.Assets;
 using PulseStack.Abstractions.Chat;
 using PulseStack.Abstractions.Knowledge;
 using PulseStack.Abstractions.Models;
+using PulseStack.Abstractions.Persistence.AIAssets.Catalog;
 using PulseStack.Abstractions.Persistence.AIAssets.Mapping;
 using PulseStack.Abstractions.Persistence.AIAssets.Storage;
 using PulseStack.Abstractions.Runtime.Application;
@@ -92,15 +93,15 @@ internal static class KnowledgeRestartProof
             IAsset[] definitions = [model, knowledge[0], knowledge[1], agent, workflow, project];
             foreach (var asset in definitions)
             {
-                var result = await writer.WriteAsync(Key(Reference(asset)), mapper.ToDocument(asset));
-                if (result is not (AIAssetWriteResult.Created or AIAssetWriteResult.AlreadyPresent))
-                    throw new InvalidOperationException($"Knowledge preparation store failed: {result}.");
+                var writeResult = await writer.WriteAsync(Key(Reference(asset)), mapper.ToDocument(asset));
+                if (writeResult is not (AIAssetWriteResult.Created or AIAssetWriteResult.AlreadyPresent))
+                    throw new InvalidOperationException($"Knowledge preparation store failed: {writeResult}.");
             }
             foreach (var asset in definitions)
             {
-                var result = await publisher.PublishAsync(Key(Reference(asset)));
-                if (result is not (AIAssetPublicationResult.Published or AIAssetPublicationResult.AlreadyPublished))
-                    throw new InvalidOperationException($"Knowledge preparation publication failed: {result}.");
+                var publicationResult = await publisher.PublishAsync(Key(Reference(asset)));
+                if (publicationResult is not (AIAssetPublicationResult.Published or AIAssetPublicationResult.AlreadyPublished))
+                    throw new InvalidOperationException($"Knowledge preparation publication failed: {publicationResult}.");
             }
             if (client.Calls != 0 || sources.Any(source => source.Calls != 0))
                 throw new InvalidOperationException("Preparation performed execution.");
