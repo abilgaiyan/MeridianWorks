@@ -16,6 +16,12 @@ using PulseStack.Core.Assets;
 using PulseStack.Core.DependencyInjection;
 using PulseStack.Providers.OpenRouter.DependencyInjection;
 
+if (args.Length > 0 && args[0] is "knowledge-prepare" or "knowledge-execute")
+{
+    await KnowledgeRestartProof.RunAsync(args);
+    return;
+}
+
 var mode = args.Length == 0 ? "default" : args[0];
 if (mode is not ("default" or "prepare" or "execute") ||
     (mode == "default" ? args.Length != 0 : args.Length != 2))

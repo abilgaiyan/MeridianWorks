@@ -17,3 +17,7 @@ The updater restores dependencies, verifies that the complete resolved PulseStac
 See [PulseStackAI development packages](docs/development/pulsestack-packages.md) for the complete package-production, local-publication, adoption, provenance, and rollback workflow.
 
 Update-PulseStack.ps1 is MeridianWorks' verified reference consumer automation; it is not a universal PulseStackAI consumer contract. Other applications consume PulseStackAI through standard NuGet sources and PackageReference semantics.
+
+## Knowledge restart conformance
+
+[Exact-package Knowledge restart proof](docs/development/knowledge-restart-proof.md) validates the persisted application through public Knowledge bindings and a recording provider in separate processes. Package production and local execution are pending evidence gates.
