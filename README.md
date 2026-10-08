@@ -20,4 +20,4 @@ Update-PulseStack.ps1 is MeridianWorks' verified reference consumer automation; 
 
 ## Knowledge restart conformance
 
-[Exact-package Knowledge restart proof](docs/development/knowledge-restart-proof.md) validates the persisted application through public Knowledge bindings and a recording provider in separate processes. Package production and local execution are pending evidence gates.
+[Exact-package Knowledge restart proof](docs/development/knowledge-restart-proof.md) validates the persisted application through public Knowledge bindings and a recording provider in separate processes. Exact-source package production, local publication, exact-version adoption, Release build and separate-process Knowledge execution were verified on 2026-10-08.
